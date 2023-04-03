@@ -1,0 +1,476 @@
+CREATE TABLE  results
+	(date DATE NOT NULL,
+	home_team CHAR(100),
+	away_team CHAR(100),
+	home_score INT,
+	away_score INT,
+	tournament CHAR(100),
+	city CHAR(100),
+	country CHAR(100),
+	neutral boolean not null
+	);
+
+COPY results(date, home_team, away_team, home_score, away_score, tournament, city, country, neutral)
+	FROM 'C:\Program Files\PostgreSQL\13\scripts\results.csv'
+	WITH (FORMAT CSV, HEADER);
+
+CREATE TABLE  goalscorers
+	(date DATE NOT NULL,
+	home_team CHAR(100),
+	away_team CHAR(100),
+	team CHAR(100),
+	scorer CHAR(100),
+	minute INT,
+	own_goal BOOLEAN NOT NULL,
+	penalty BOOLEAN NOT NULL
+	);
+
+COPY goalscorers(date, home_team, away_team, team, scorer, minute,own_goal, penalty)
+	FROM 'C:\Program Files\PostgreSQL\13\scripts\goalscorers2.csv'
+	WITH (FORMAT CSV, HEADER);
+
+CREATE TABLE  shootouts
+	(date DATE NOT NULL,
+	home_team CHAR(100),
+	away_team CHAR(100),
+	winner CHAR(100)
+	);
+
+COPY shootouts(date, home_team, away_team, winner)
+	FROM 'C:\Program Files\PostgreSQL\13\scripts\shootouts.csv'
+	WITH (FORMAT CSV, HEADER);
+
+--- this match has been played twice in the same day, we keep only the first match
+delete
+	from results -- it does not appear in goalscorers nor in shootouts
+	where date = '1974-02-17'
+		and home_team = 'Tahiti'
+		and away_team = 'New Caledonia'
+		and home_score = 1
+		and away_score = 2;
+
+--- this match has been played twice in the same day, we keep only the first match
+delete
+	from results -- it does not appear in goalscorers nor in shootouts
+	where date = '1977-10-22'
+		and home_team = 'Guyana'
+		and away_team = 'Barbados'
+		and home_score = 0
+		and away_score = 0;
+
+--- this match appears only in shootouts
+delete
+	from shootouts
+	where date = '2011-06-29'
+		and home_team = 'Saare County'
+		and away_team = 'Åland Islands';
+		
+drop table shootouts;
+drop table goalscorers;
+drop table results;
+
+---(1) FIFA World Cup matches ordered by how many goals have been scored by the same player
+select g.date, g.home_team, g.away_team, r.home_score, r.away_score, g.scorer, count(*) as goals
+	from goalscorers g, results r
+		where (r.date, r.home_team, r.away_team) = (g.date, g.home_team, g.away_team)
+			and g.scorer <> 'NA'
+			and r.tournament = 'FIFA World Cup'
+	group by g.date, g.home_team, g.away_team, r.home_score, r.away_score, g.scorer
+	order by goals desc;
+	
+alter table results
+add constraint match_id
+primary key (date, home_team, away_team);
+
+alter table goalscorers
+add constraint match_id
+foreign key (date, home_team, away_team)
+references results (date, home_team, away_team);
+
+alter table shootouts
+add constraint match_id
+foreign key (date, home_team, away_team)
+references results (date, home_team, away_team);
+	
+alter table shootouts drop constraint match_id;
+alter table goalscorers drop constraint match_id;
+alter table results drop constraint match_id;
+
+
+---(2) matches that Italy lost, in which Christian Vieri scored at least one goal
+--matches that Italy lost being the home team, in which Christian Vieri scored at least one goal
+select o.date as d, o.home_team, o.away_team, o.home_score, o.away_score, o.tournament, o.country, o.city
+	from
+		(--matches in which Christian Vieri scored at least one goal
+			select r.date, r.home_team, r.away_team, r.home_score, r.away_score, r.tournament, r.country, r.city
+				from results r, goalscorers g
+				where g.scorer = 'Christian Vieri' 
+					and (r.date, r.home_team, r.away_team) = (g.date, g.home_team, g.away_team)
+		) as o
+	where o.home_team = 'Italy'
+		and o.home_score < o.away_score	
+union
+--matches that Italy lost being the away team, in which Christian Vieri scored at least one goal
+select o.date as d, o.home_team, o.away_team, o.home_score, o.away_score, o.tournament, o.country, o.city
+	from
+		(--matches in which Christian Vieri scored at least one goal
+			select r.date, r.home_team, r.away_team, r.home_score, r.away_score, r.tournament, r.country, r.city
+				from results r, goalscorers g
+				where g.scorer = 'Christian Vieri' 
+					and (r.date, r.home_team, r.away_team) = (g.date, g.home_team, g.away_team)
+		) as o
+	where o.away_team = 'Italy'
+		and o.home_score > o.away_score	
+union
+--matches that Italy lost on penalties, in which Christian Vieri scored at least one goal
+select o.date as d, o.home_team, o.away_team, o.home_score, o.away_score, o.tournament, o.country, o.city
+	from
+		(--matches in which Christian Vieri scored at least one goal
+			select r.date, r.home_team, r.away_team, r.home_score, r.away_score, r.tournament, r.country, r.city
+				from results r, goalscorers g
+				where g.scorer = 'Christian Vieri' 
+					and (r.date, r.home_team, r.away_team) = (g.date, g.home_team, g.away_team)
+		) as o, shootouts s
+	where (o.date, o.home_team, o.away_team) = (s.date, s.home_team, s.away_team)
+		and s.winner <> 'Italy'	
+	group by d, o.home_team, o.away_team, o.home_score, o.away_score, o.tournament, o.country, o.city
+	order by d;
+
+alter table results
+add constraint match_id
+primary key (date, home_team, away_team);
+
+alter table goalscorers
+add constraint match_id
+foreign key (date, home_team, away_team)
+references results (date, home_team, away_team);
+
+alter table shootouts
+add constraint match_id
+foreign key (date, home_team, away_team)
+references results (date, home_team, away_team);
+	
+alter table shootouts drop constraint match_id;
+alter table goalscorers drop constraint match_id;
+alter table results drop constraint match_id;
+
+
+---(3) for every team, return the name and the average number of goal scored in matches that ended on penalties
+select o.home_team as team, avg(o.home_score) as Average_Goal
+	from
+		(--date, home_team and home_score of every match ended on penalties
+		select r.date, r.home_team, r.home_score
+			from results r, shootouts s
+			where (r.date, r.home_team, r.away_team) = (s.date, s.home_team, s.away_team)
+		union
+		--date, away_team and away_score of every match ended on penalties
+		select r.date, r.away_team, r.away_score
+			from results r, shootouts s
+			where (r.date, r.home_team, r.away_team) = (s.date, s.home_team, s.away_team)
+		) as o
+	group by team
+	order by Average_Goal desc;
+	
+alter table results
+add constraint match_id
+primary key (date, home_team, away_team);
+
+alter table goalscorers
+add constraint match_id
+foreign key (date, home_team, away_team)
+references results (date, home_team, away_team);
+
+alter table shootouts
+add constraint match_id
+foreign key (date, home_team, away_team)
+references results (date, home_team, away_team);
+	
+alter table shootouts drop constraint match_id;
+alter table goalscorers drop constraint match_id;
+alter table results drop constraint match_id;
+
+---(4) UEFA Euro top scorer and how many goals he scored
+select *
+	from
+	(--players who scored in UEFA Euro matches, and how many goals they scored
+		select g.scorer, count(*) as goal_count
+			from goalscorers g, results r
+			where (g.date, g.home_team, g.away_team) = (r.date, r.home_team, r.away_team)
+				and r.tournament = 'UEFA Euro'
+			group by g.scorer
+	) as o
+	where o.goal_count = (select max(o.goal_count) from
+						  	(--players who scored in UEFA Euro matches, and how many goals they scored
+						 		select g.scorer, count(*) as goal_count
+									from goalscorers g, results r
+									where (g.date, g.home_team, g.away_team) = (r.date, r.home_team, r.away_team)
+										and r.tournament = 'UEFA Euro'
+									group by g.scorer
+							  ) as o
+						 );
+
+create index tournament_idx on results (tournament);
+
+drop index tournament_idx;
+
+
+---(5) all the matches won by Argentina in which Diego Maradona has scored
+--matches won by Argentina on penalties, in which Diego Maradona scored at least one goal
+select r.date, r.home_team, r.away_team, r.home_score, r.away_score, r.tournament
+	from results r, goalscorers g, shootouts s
+	where (r.date, r.home_team, r.away_team) = (g.date, g.home_team, g.away_team)
+		and (r.date, r.home_team, r.away_team) = (s.date, s.home_team, s.away_team)
+		and g.scorer = 'Diego Maradona'
+		and s.winner = g.team
+union
+--matches won by Argentina being the home team, in which Diego Maradona scored at least one goal
+select r.date, r.home_team, r.away_team, r.home_score, r.away_score, r.tournament
+	from results r, goalscorers g
+	where (r.date, r.home_team, r.away_team) = (g.date, g.home_team, g.away_team)
+		and g.scorer = 'Diego Maradona'
+		and g.team = r.home_team
+		and r.home_score > r.away_score
+union
+--matches won by Argentina being the away team, in which Diego Maradona scored at least one goal
+select r.date, r.home_team, r.away_team, r.home_score, r.away_score, r.tournament
+	from results r, goalscorers g
+	where (r.date, r.home_team, r.away_team) = (g.date, g.home_team, g.away_team)
+		and g.scorer = 'Diego Maradona'
+		and g.team = r.away_team
+		and r.home_score < r.away_score
+group by r.date, r.home_team, r.away_team, r.home_score, r.away_score, r.tournament
+order by date
+		
+create index idx_scorer on goalscorers (scorer);
+
+drop index idx_scorer;
+
+---(6) teams that have played Mundialito matches winning none of them
+select r.home_team
+	from results r
+	where r.home_team not in
+		(--teams that have won at least one Mundialito match being the home team		
+			select o.winner
+				from(
+						--winners of Mundialito matches ended on penalties
+						select s.winner
+							from shootouts s, results r
+							where (s.date, s.home_team, s.away_team) = (r.date, r.home_team, r.away_team)
+								and r.tournament = 'Mundialito'
+						union all
+						--winners of Mundialito matches won by the home team (no penalties)
+						select r.home_team
+							from results r
+							where r.home_score > r.away_score
+								and r.tournament = 'Mundialito'
+						union all
+						--winners of Mundialito matches won by the away team (no penalties)
+						select r.away_team
+							from results r
+							where r.home_score < r.away_score
+								and r.tournament = 'Mundialito'
+				) as o
+				group by o.winner
+		)
+		and r.tournament = 'Mundialito'
+	group by home_team
+union
+select r.away_team
+	from results r
+	where r.away_team not in
+		(-- teams that have won at least one Mundialito match as home_team		
+			select o.winner
+				from(
+						--winners of Mundialito matches ended on penalties
+						select s.winner
+							from shootouts s, results r
+							where (s.date, s.home_team, s.away_team) = (r.date, r.home_team, r.away_team)
+								and r.tournament = 'Mundialito'
+						union all
+						--winners of Mundialito matches won by the home team (no penalties)
+						select r.home_team
+							from results r
+							where r.home_score > r.away_score
+								and r.tournament = 'Mundialito'
+						union all
+						--winners of Mundialito matches won by the away team (no penalties)
+						select r.away_team
+							from results r
+							where r.home_score < r.away_score
+								and r.tournament = 'Mundialito'
+				) as o
+				group by o.winner
+		)
+		and r.tournament = 'Mundialito'
+	group by away_team
+
+
+create index idx_tournament on results (tournament);
+
+drop index idx_tournament;
+
+
+create materialized view Mundialito_Winners as
+	--winners of every Mundialito match
+	--winners of every match ended on penalties
+	select s.winner
+		from shootouts s, results r
+        where (s.date, s.home_team, s.away_team) = (r.date, r.home_team, r.away_team)
+            and r.tournament = 'Mundialito'
+    union
+    --winners of every Mundialito match won by the home team (not on penalties)
+    select r.home_team
+        from results r
+        where r.home_score > r.away_score
+            and r.tournament = 'Mundialito'
+    union
+    --winners of every Mundialito match won by the away team (not on penalties)
+    select r.away_team
+        from results r
+        where r.home_score < r.away_score
+            and r.tournament = 'Mundialito'
+
+drop materialized view Mundialito_Winners;
+
+--teams that have played Mundialito matches winning none of them
+--teams that have played home Mundialito matches, that have never won a Mundialito match 
+select r.home_team
+	from results r
+	where r.home_team not in (select * from Mundialito_Winners)
+		and r.tournament = 'Mundialito'
+	group by home_team
+union
+--teams that have played away Mundialito matches, that have never won a Mundialito match
+select r.away_team
+	from results r
+	where r.away_team not in (select * from Mundialito_Winners)
+		and r.tournament = 'Mundialito'
+	group by away_team
+
+---(7) all the matches won on penalties by teams that have conceded a goal by Ronaldo
+select distinct r.date, r.home_team, r.away_team, r.home_score, r.away_score, r.tournament, r.country, r.city
+	from results r, shootouts s, goalscorers g
+	where (r.date, r.home_team, r.away_team) = (s.date, s.home_team, s.away_team)
+		and s.winner in
+			(--teams that have conceded a goal by Ronaldo
+				--teams that have conceded a goal by Ronaldo in a home game
+				select distinct g.home_team
+					from goalscorers g
+					where g.scorer = 'Ronaldo'
+						and g.home_team <> g.team
+				union
+				--teams that have conceded a goal by Ronaldo in an away game
+				select distinct g.away_team
+					from goalscorers g
+					where g.scorer = 'Ronaldo'
+						and g.away_team <> g.team
+			)
+			
+create materialized view Teams_that_conceded_a_goal_by_Ronaldo as
+	--teams that have conceded a goal by Ronaldo
+	--teams that have conceded a goal by Ronaldo in a home game
+	select distinct g.home_team
+		from goalscorers g
+		where g.scorer = 'Ronaldo'
+			and g.home_team <> g.team
+	union
+	--teams that have conceded a goal by Ronaldo in an away game
+	select distinct g.away_team
+		from goalscorers g
+		where g.scorer = 'Ronaldo'
+			and g.away_team <> g.team
+
+drop view Teams_that_conceded_a_goal_by_Ronaldo;
+
+drop materialized view Teams_that_conceded_a_goal_by_Ronaldo;
+
+select distinct r.date, r.home_team, r.away_team, r.home_score, r.away_score, r.tournament, r.country, r.city
+	from results r, shootouts s, Teams_that_conceded_a_goal_by_Ronaldo
+	where (r.date, r.home_team, r.away_team) = (s.date, s.home_team, s.away_team)
+		and s.winner in (select * from Teams_that_conceded_a_goal_by_Ronaldo);
+
+
+---(8) return the team that has scored more goals in the extratime of FIFA World Cup matches not ended on penlaties
+
+create view Extratime_goals(team, goalcount) as
+	-- all the teams that have scored in the extra-time of a FIFA World Cup matches not ended on penalties
+	select g.team, count(*) as Goal_Count
+		from goalscorers g,
+		(	-- all the matches not ended on penalties
+			select r.date, r.home_team, r.away_team, r.tournament
+				from results r
+			except
+				select r.date, r.home_team, r.away_team, r.tournament
+					from shootouts s join results r on (s.date = r.date and s.home_team=r.home_team and s.away_team=r.away_team)
+		) as o
+		where (g.date, g.home_team, g.away_team) = (o.date, o.home_team, o.away_team)
+			and o.tournament = 'FIFA World Cup'
+			and g.minute > 90
+	group by g.team
+	order by Goal_Count desc
+	
+drop view Extratime_goals;
+	
+select eg.team, eg.goalcount
+	from Extratime_Goals eg
+	where eg.goalcount = (select max(eg.goalcount) from Extratime_Goals eg)
+
+
+create materialized view Extratime_goals(team, goalcount) as
+	-- all the teams that have scored in the extra-time of a FIFA World Cup match that did not end on penalties
+	select g.team, count(*) as Goal_Count
+		from goalscorers g,
+		(	-- all the matches that did not end on penalties
+			select r.date, r.home_team, r.away_team, r.tournament
+				from results r
+			except
+				select r.date, r.home_team, r.away_team, r.tournament
+					from shootouts s join results r on (s.date = r.date and s.home_team=r.home_team and s.away_team=r.away_team)
+		) as o
+		where (g.date, g.home_team, g.away_team) = (o.date, o.home_team, o.away_team)
+			and o.tournament = 'FIFA World Cup'
+			and g.minute > 90
+	group by g.team
+	order by Goal_Count desc
+
+drop materialized view Extratime_Goals;
+	
+select eg.team, eg.goalcount
+	from Extratime_Goals eg
+	where eg.goalcount = (select max(eg.goalcount) from Extratime_Goals eg)
+
+
+---(9) matches lost because of an own goal
+--matches in which the home team has scored an own goal, and lost the match because of it
+select r.date, r.home_team, r.away_team, r.home_score, r.away_score, r.tournament
+	from results r, goalscorers g
+	where (r.date, r.home_team, r.away_team) = (g.date, g.home_team, g.away_team)
+		and g.own_goal = 'TRUE'
+		and g.team = g.away_team
+		and (r.home_score - r.away_score) = -1
+union
+--matches in which the away team has scored and own goal, and lost the match because of it
+select r.date, r.home_team, r.away_team, r.home_score, r.away_score, r.tournament
+	from results r, goalscorers g
+	where (r.date, r.home_team, r.away_team) = (g.date, g.home_team, g.away_team)
+		and g.own_goal = 'TRUE'
+		and g.team = g.home_team
+		and (r.home_score - r.away_score) = 1
+
+alter table results
+add constraint match_id
+primary key (date, home_team, away_team);
+
+alter table goalscorers
+add constraint match_id
+foreign key (date, home_team, away_team)
+references results (date, home_team, away_team);
+
+alter table shootouts
+add constraint match_id
+foreign key (date, home_team, away_team)
+references results (date, home_team, away_team);
+
+alter table shootouts drop constraint match_id;
+alter table goalscorers drop constraint match_id;
+alter table results drop constraint match_id;
